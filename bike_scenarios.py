@@ -26,6 +26,15 @@ ANSI = {
     "magenta": "\033[35m",
 }
 
+REQUIRED_CATEGORIES = [
+    "Frame","Headset","Fork","Wheelset",
+    "TyreFront","TyreRear","TubelessKit",
+    "Rotors","Brakes","BrakeAdapters",
+    "Drivetrain","Crankset","BottomBracket","ShiftCables",
+    "CockpitBar","CockpitStem","Grips","Seatpost","SeatClamp",
+    "Saddle","Pedals","ThruAxles"
+]
+
 def load_parts(path: str) -> List[dict]:
     parts = []
     with open(path, newline="", encoding="utf-8") as f:
@@ -176,6 +185,24 @@ def apply_scenario_mapping(mapping, cats):
         picks[cat] = chosen
     return picks
 
+def check_completeness(picks, cats):
+    have = {k for k,v in picks.items() if v}
+    missing = [c for c in REQUIRED_CATEGORIES if c not in have]
+    if not missing:
+        print(ANSI["green"] + "Scenario appears COMPLETE for a full bike." + ANSI["reset"])
+    else:
+        print(ANSI["yellow"] + "Missing categories for a full bike:" + ANSI["reset"])
+        for c in missing:
+            opts = cats.get(c, [])
+            if opts:
+                o = opts[0]
+                print(f"  - {c}: e.g., {o['brand']} {o['model']} [{o.get('variant','')}] {o['weight_g']:.0f} g ${o['price_sgd']:.0f}")
+            else:
+                print(f"  - {c}: (no options in database yet)")
+    total_w = sum(p["weight_g"] for p in picks.values() if p)
+    total_p = sum(p["price_sgd"] for p in picks.values() if p)
+    print(f"Current subtotal (selected only): {total_w:.0f} g, ${total_p:.0f} SGD")
+
 def add_part_interactive():
     print(ANSI["magenta"] + "\nAdd a new part to parts.csv" + ANSI["reset"])
     fields = [
@@ -209,7 +236,7 @@ def add_part_interactive():
 def main():
     # Parse very simple CLI flags (no argparse to stay dependency-free)
     args = sys.argv[1:]
-    flags = {a for a in args if a.startswith("--")}
+    flags = {a for a in args if a.startswith("--") and "=" not in a}
     values = {a.split("=",1)[0]: a.split("=",1)[1] for a in args if a.startswith("--") and "=" in a}
 
     if "--add-part" in flags:
@@ -244,6 +271,20 @@ def main():
             save_scenario(name, picks, (total_w, total_p))
         return
 
+    # Completeness checker for a file
+    check_file = values.get("--check-scenario")
+    if check_file:
+        mapping = {}
+        if check_file.lower().endswith(".json"):
+            with open(check_file, "r", encoding="utf-8") as f:
+                mapping = json.load(f)
+            mapping = mapping.get("picks", mapping)
+        else:
+            mapping = parse_simple_yaml(check_file)
+        picks = apply_scenario_mapping(mapping, cats)
+        check_completeness(picks, cats)
+        return
+
     # Clone last scenario preselects
     preselect = None
     if "--clone-last" in flags:
@@ -273,6 +314,10 @@ def main():
         choice = pick_for_category(cat, cats[cat], preselect=preselect_objs.get(cat))
         picks[cat] = choice
         summarize(picks)
+
+    # Completeness feedback
+    print()
+    check_completeness(picks, cats)
 
     tot = summarize(picks)
     auto_save = ("--auto-save" in flags)
